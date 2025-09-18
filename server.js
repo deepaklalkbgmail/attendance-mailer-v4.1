@@ -222,10 +222,12 @@ async function getSmtpConfig() {
     db.get("SELECT * FROM smtp_settings WHERE id=1", (err, row) => {
       if (err) return reject(err);
       if (!row) return reject(new Error('SMTP settings not found.'));
+      const portNumber = parseInt(row.port, 10);
+      const secureFlag = Number(row.secure) === 1;
       resolve({
         host: row.host || '',
-        port: row.port || 587,
-        secure: !!row.secure,
+        port: !isNaN(portNumber) ? portNumber : 587,
+        secure: secureFlag,
         auth: (row.user && row.pass) ? { user: row.user, pass: row.pass } : undefined,
         from: row.from_addr || row.user || ''
       });
@@ -322,7 +324,13 @@ async function sendMailsByIds(ids) {
   if (!smtp.host || !smtp.from || !smtp.auth) throw new Error('SMTP settings are incomplete. Configure it in Settings.');
 
   const transporter = nodemailer.createTransport({
-    host: smtp.host, port: smtp.port, secure: smtp.secure, requireTLS: true, auth: smtp.auth, logger: true, debug: true
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    requireTLS: !smtp.secure,
+    auth: smtp.auth,
+    logger: true,
+    debug: true
   });
 
   const placeholders = ids.map(() => '?').join(',');
@@ -356,9 +364,13 @@ app.get('/settings', requireAuth, (req, res) => db.get("SELECT * FROM smtp_setti
 }));
 app.post('/settings', requireAuth, (req, res) => {
   const { host, port, secure, user, pass, from_addr } = req.body;
-  db.run(`UPDATE smtp_settings SET host=?, port=?, secure=?, user=?, pass=?, from_addr=? WHERE id=1`,
-    [host || '', parseInt(port || 587, 10), secure ? 1 : 0, user || '', pass || '', from_addr || ''],
-    (err) => err ? res.status(500).send(err.message) : res.redirect('/settings'));
+  const secureFlag = String(secure) === '1';
+  const portNumber = parseInt(port || 587, 10);
+  db.run(
+    `UPDATE smtp_settings SET host=?, port=?, secure=?, user=?, pass=?, from_addr=? WHERE id=1`,
+    [host || '', isNaN(portNumber) ? 587 : portNumber, secureFlag ? 1 : 0, user || '', pass || '', from_addr || ''],
+    (err) => err ? res.status(500).send(err.message) : res.redirect('/settings')
+  );
 });
 
 app.get('/upload', requireAuth, (req, res) => res.render('upload', { preview: null, error: null, banner: '' }));
